@@ -278,4 +278,6 @@
     setInterval(updateTimers, 1000);
     </script>
 
-</
+</body>
+
+</html>
