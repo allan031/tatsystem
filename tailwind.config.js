@@ -1,6 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["admin/*.php", "pages/*.php", "class/*.php", "*.php"],
+  content: [
+    "./admin/**/*.php",
+    "./pages/**/*.php",
+    "./class/**/*.php",
+    "./**/*.php",
+    "./**/*.js"
+  ],
   theme: {
     extend: {
       screens: {
@@ -20,7 +26,7 @@ module.exports = {
         fifth: "#eedee2",
         primary: "#f48786",
       },
-      fontFamily:{
+      fontFamily: {
         poppins: ['Poppins', 'sans-serif'],
       },
     },
