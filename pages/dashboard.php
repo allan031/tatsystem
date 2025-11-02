@@ -141,6 +141,14 @@
             return 'pulse-orange';
         }
 
+        function getStatusColorAndEmoji(diff) {
+            if (diff < 3600) return ['pulse-green', '😊']; // < 1 hour
+            if (diff < 7200) return ['pulse-yellow', '😐']; // 1–2 hours
+            if (diff < 14400) return ['pulse-red', '😢']; // 2–4 hours
+            return ['pulse-orange', '😭']; // 4+ hours
+        }
+
+
         function renderDashboard(data) {
             let html = '';
 
@@ -155,15 +163,20 @@
                 // If either has an EndTime, patient is done → exclude
                 if ((disposition && disposition.EndTS) || (transfer && transfer.EndTS)) return;
 
+                // Compute total stay since triage start
                 const startTS = normalizeTS(triageProc.StartTS);
                 const now = Math.floor(Date.now() / 1000);
                 const diff = now - startTS;
 
-                const pulseClass = getPulseClass(diff);
+                // Get pulse + emoji based on total stay
+                const [pulseClass, emoji] = getStatusColorAndEmoji(diff);
 
                 html += `
       <div class="font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all p-5 ${pulseClass}">
-        <h2 class="text-[25px] font-bold text-gray-800 mb-1">Patient #${patient.PatientNumber}</h2>
+        <h2 class="text-[25px] font-bold text-gray-800 mb-1 flex items-center justify-between">
+          Patient #${patient.PatientNumber}
+          <span class="ml-3 text-5xl">${emoji}</span>
+        </h2>
         <p class="text-lg text-gray-600 mb-4">Age Group: <span class="text-[20px]">${patient.AgeGroup}</span></p>
         <div class="border-t border-gray-200 pt-2">
           <h3 class="font-semibold text-gray-700 mb-2 text-lg">Procedures:</h3>
@@ -177,7 +190,6 @@
                         `<span class='text-green-600 font-semibold'>Ongoing</span>`;
                     const startTS = normalizeTS(proc.StartTS);
                     const endTS = normalizeTS(proc.EndTS);
-                    const now = Math.floor(Date.now() / 1000);
                     let duration = startTS ? (endTS ? endTS - startTS : now - startTS) : 0;
                     if (duration < 0) duration = 0;
 
@@ -213,6 +225,7 @@
 
             $('#tatDashboard').html(html);
         }
+
 
 
         function updateTimers() {
