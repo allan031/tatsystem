@@ -219,7 +219,7 @@
             // If no patients left
             if (html === '') {
                 html = `<div class="text-center text-gray-500 text-xl col-span-full">
-              ✅ All patients have been disposed or transferred.
+              All patients have been discharge or admitted
             </div>`;
             }
 
