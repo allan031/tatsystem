@@ -555,76 +555,101 @@ class Transaction extends DBConnection
     {
         try {
             date_default_timezone_set('Asia/Manila');
-
             $query = "
-            WITH cte_start AS (
-                SELECT
-                    t.TransactionID,
-                    t.QRCode AS [PatientNumber],
-                    t.DepartmentID,
-                    t.TransactionTypeID AS [tTypeID],
-                    t.ProcedureTypeID,
-                    t.SubProcedureTypeID AS [subID],
-                    t.[Procedure], 
-                    t.ScanDate AS [start],
-                    t.CreatedBy,
-                    t.ScanDate AS [CreatedDate]
-                FROM TblTransaction t
-                WHERE t.TransactionTiming = 'Start'
-            ),
-            cte_end AS (
-                SELECT
-                    e.QRCode,
-                    e.TransactionTypeID,
-                    e.ProcedureTypeID,
-                    e.SubProcedureTypeID,
-                    e.[Procedure],
-                    e.ScanDate AS [end],
-                    e.Remarks
-                FROM TblTransaction e
-                WHERE e.TransactionTiming = 'End'
-            )
-            SELECT 
-                a.PatientNumber,
-                p.PatientAgeGroup AS [AgeGroup],
-                pt.ProcedureType AS [ProcedureType],
-                CASE 
-                    WHEN a.ProcedureTypeID = 9003 AND a.subID = 0 THEN 'Patient Assessment'
-                    WHEN a.subID = 0 THEN 'N/A'
-                    ELSE spt.SubProcedureType 
-                END AS [SubProcedureType],
-                -- Use faster date conversion
-                CONVERT(VARCHAR(19), a.[start], 120) AS [Start],
-                CONVERT(VARCHAR(19), b.[end], 120) AS [End],
-                concat(EmpLastName,', ',EmpFirstName,' ',EmpMiddleName) AS [FullName]
-            FROM cte_start a
-            LEFT JOIN cte_end b 
-                ON b.QRCode = a.PatientNumber
-                AND b.SubProcedureTypeID = a.subID
-                AND b.ProcedureTypeID = a.ProcedureTypeID
-                AND a.[Procedure] = b.[Procedure]
+                WITH cte_start AS (
+                    SELECT
+                        t.TransactionID,
+                        t.QRCode AS [PatientNumber],
+                        t.DepartmentID,
+                        t.TransactionTypeID AS [tTypeID],
+                        t.ProcedureTypeID,
+                        t.SubProcedureTypeID AS [subID],
+                        t.[Procedure],
+                        t.ScanDate AS [start],
+                        t.CreatedBy,
+                        t.ScanDate AS [CreatedDate]
+                    FROM TblTransaction t
+                    WHERE t.TransactionTiming = 'Start'
+                ),
+                cte_end AS (
+                    SELECT
+                        e.QRCode,
+                        e.TransactionTypeID,
+                        e.ProcedureTypeID,
+                        e.SubProcedureTypeID,
+                        e.[Procedure],
+                        e.ScanDate AS [end],
+                        e.Remarks
+                    FROM TblTransaction e
+                    WHERE e.TransactionTiming = 'End'
+                ),
 
+                cte_patientid AS (
+                    SELECT 
+                        QRCode,
+                        LTRIM(RTRIM(RIGHT(Remarks, CHARINDEX('/', REVERSE(Remarks)) - 1))) AS ExtractedPatientID
+                    FROM TblTransaction
+                    WHERE SubProcedureTypeID IN (
+                        SELECT ID FROM TblSubProcedureType WHERE SubProcedureType = 'Registration'
+                    )
+                    AND CHARINDEX('/', Remarks) > 0
+                    AND TransactionTiming = 'End'
+                )
 
-            LEFT JOIN dbo.TblDepartment d 
-                ON a.DepartmentID = d.DepartmentID
+                SELECT 
+                    COALESCE(pid.ExtractedPatientID, a.PatientNumber) AS [PatientNumber], -- ✅ use extracted ID if available
 
-            LEFT JOIN dbo.TblProcedureType pt 
-                ON a.ProcedureTypeID = pt.ProcedureTypeID
+                    p.PatientAgeGroup AS [AgeGroup],
+                    d.DepartmentAbbreviation as Department,
+                    pt.ProcedureType AS [ProcedureType],
+                    CASE 
+                        WHEN a.ProcedureTypeID = 9003 AND a.subID = 0 THEN 'Patient Assessment'
+                        WHEN a.subID = 0 THEN 'N/A'
+                        ELSE spt.SubProcedureType 
+                    END AS [SubProcedureType],
+                    
+                    CONVERT(VARCHAR(19), a.[start], 120) AS [Start],
+                    CONVERT(VARCHAR(19), b.[end], 120) AS [End],
+                    CONCAT(EmpLastName, ', ', EmpFirstName, ' ', EmpMiddleName) AS [FullName],
 
-            LEFT JOIN dbo.TblSubProcedureType spt 
-                ON a.SubID = spt.ID
+                    CASE 
+                        WHEN spt.SubProcedureType = 'Registration' THEN b.Remarks
+                        ELSE NULL
+                    END AS [Remarks],
 
-            LEFT JOIN dbo.TblUser u 
-                ON a.CreatedBy = u.UserID
+                    pid.ExtractedPatientID AS [ExtractedRemarks] -- show extracted ID for reference
 
-            LEFT JOIN Staging_TAT.dbo.Tbl_PatRegister2 pr
-                ON a.PatientNumber COLLATE DATABASE_DEFAULT = pr.remarks COLLATE DATABASE_DEFAULT
+                FROM cte_start a
+                LEFT JOIN cte_end b 
+                    ON b.QRCode = a.PatientNumber
+                    AND b.SubProcedureTypeID = a.subID
+                    AND b.ProcedureTypeID = a.ProcedureTypeID
+                    AND a.[Procedure] = b.[Procedure]
 
-            INNER JOIN dbo.TblPatient p 
-                ON a.PatientNumber = p.QRCode
+                LEFT JOIN dbo.TblDepartment d 
+                    ON a.DepartmentID = d.DepartmentID
 
-            where convert(date,a.[start]) = convert(date,GETDATE())
-            ORDER BY convert(date,a.[start]) DESC";
+                LEFT JOIN dbo.TblProcedureType pt 
+                    ON a.ProcedureTypeID = pt.ProcedureTypeID
+
+                LEFT JOIN dbo.TblSubProcedureType spt 
+                    ON a.SubID = spt.ID
+
+                LEFT JOIN dbo.TblUser u 
+                    ON a.CreatedBy = u.UserID
+
+                LEFT JOIN Staging_TAT.dbo.Tbl_PatRegister2 pr
+                    ON a.PatientNumber COLLATE DATABASE_DEFAULT = pr.remarks COLLATE DATABASE_DEFAULT
+
+                LEFT JOIN dbo.TblPatient p 
+                    ON a.PatientNumber = p.QRCode
+
+                LEFT JOIN cte_patientid pid 
+                    ON pid.QRCode = a.PatientNumber
+
+                WHERE CONVERT(date, a.[start]) = CONVERT(date, GETDATE())
+                ORDER BY a.[start] DESC;
+            ";
 
             $stmt = $this->mssql_connect()->prepare($query);
             $stmt->execute();
@@ -678,6 +703,7 @@ class Transaction extends DBConnection
 
                 // Append procedure
                 $patients[$row['PatientNumber']]['Procedures'][] = [
+                    'Department' => $row['Department'],
                     'ProcedureType' => $row['ProcedureType'],
                     'SubProcedureType' => $row['SubProcedureType'],
                     'StartTime' => $startTS ? date('H:i', $startTS) : '—',

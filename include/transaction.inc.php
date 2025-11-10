@@ -23,7 +23,7 @@ if ($tranx_js->{'Action'} == 'DisplayAllTATData') {
    $from = $tranx_js->{'from'};
    $to = $tranx_js->{'to'};
 
-   //$transaction->TATAllData($from, $to);
+   //$transaction->TATAllData($from, $to); 
 }
 if ($tranx_js->{'Action'} == 'LoadTATDashboard') {
    $transaction->TATDashboard();
