@@ -113,156 +113,188 @@
     </div>
 
     <script>
+    /* ---------- Utilities ---------- */
+
+    // Format seconds to HH:MM:SS
     function formatHMS(seconds) {
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
-        const s = Math.floor(seconds % 60);
+        const s = seconds % 60;
         return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
 
+    // Normalize timestamps (string/number → unix seconds)
     function normalizeTS(raw) {
-        if (!raw || raw === 'null' || raw === '') return null;
+        if (raw === null || raw === undefined) return null;
+        if (raw === "null" || raw === "") return null;
+
         const n = Number(raw);
         if (!isFinite(n)) return null;
-        return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+
+        // Convert ms → sec
+        return n > 1e12 ? Math.floor(n / 1000) : n;
     }
 
-    // thresholds in seconds
+    // Color thresholds in seconds
     const thresholds = {
-        green: 3600, // < 1 hour
-        yellow: 7200, // 1–2 hours
-        red: 14400 // 2–4 hours
+        green: 3600, // <1h
+        yellow: 7200, // <2h
+        red: 14400 // <4h
     };
 
     function getStatusColorAndEmoji(diff) {
-        if (diff < thresholds.green) return ['pulse-green', '😊'];
-        if (diff < thresholds.yellow) return ['pulse-yellow', '😐'];
-        if (diff < thresholds.red) return ['pulse-red', '😢'];
-        return ['pulse-orange', '😭'];
+        if (diff < thresholds.green) return ["pulse-green", "😊"];
+        if (diff < thresholds.yellow) return ["pulse-yellow", "😐"];
+        if (diff < thresholds.red) return ["pulse-red", "😢"];
+        return ["pulse-orange", "😭"];
     }
 
-    // main dashboard render
+    /* ---------- Main Renderer ---------- */
+
     function renderDashboard(data) {
-        let html = '';
+        let html = "";
 
         data.forEach(patient => {
             const triageProc = patient.Procedures.find(p => p.ProcedureType === "Triage");
             if (!triageProc) return;
 
-            // check if patient already disposed/transferred
-            const disposition = patient.Procedures.find(p => p.ProcedureType === "Disposition");
-            const transfer = patient.Procedures.find(p => p.ProcedureType === "Transfer To Room");
-            if ((disposition && disposition.EndTS) || (transfer && transfer.EndTS)) return;
+            const triageStartTS = normalizeTS(triageProc.StartTS);
 
-            // total stay
-            const startTS = normalizeTS(triageProc.StartTS);
+            // Debug: Show triage timestamps coming from PHP
+            console.log("Patient", patient.PatientNumber, "Triage StartTS =", triageProc.StartTS);
+
+            if (!triageStartTS) {
+                console.warn("❌ Missing or invalid Triage StartTS for patient:", patient);
+            }
+
             const now = Math.floor(Date.now() / 1000);
-            const diff = now - startTS;
+            const diff = now - triageStartTS;
 
             const [pulseClass, emoji] = getStatusColorAndEmoji(diff);
 
-            const displayId = patient.ExtractedRemarks && patient.ExtractedRemarks.trim() !== '' ?
-                patient.ExtractedRemarks :
-                patient.PatientNumber;
+            const patientID = patient.ExtractedRemarks?.trim() || patient.PatientNumber;
 
             html += `
-        <div class="font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all p-5 ${pulseClass}"
-            data-triage-start="${startTS}">
-            <h2 class="text-[25px] font-bold text-gray-800 mb-1 flex items-center justify-between">
-                Patient #${displayId}
-                <span class="ml-3 text-5xl emoji">${emoji}</span>
-            </h2>
-        <p class="text-lg text-gray-600 mb-4">Age Group: <span class="text-[20px]">${patient.AgeGroup}</span></p>
-        <div class="border-t border-gray-200 pt-2">
-          <h3 class="font-semibold text-gray-700 mb-2 text-lg">Procedures:</h3>
-          <ul class="text-lg text-gray-600 space-y-2 max-h-40 overflow-y-auto">
-    `;
+            <div class="font-semibold rounded-2xl shadow-md hover:shadow-lg transition-all p-5 ${pulseClass}"
+                 data-triage-start="${triageStartTS}">
+                 
+                <h2 class="text-[25px] font-bold flex justify-between">
+                    Patient #${patientID}
+                    <span class="text-5xl emoji">${emoji}</span>
+                </h2>
+
+                <p class="text-lg text-gray-600 mb-4">
+                    Age Group: <span class="text-[20px]">${patient.AgeGroup}</span>
+                </p>
+
+                <div class="border-t border-gray-200 pt-2">
+                    <h3 class="font-semibold text-lg mb-2">Procedures:</h3>
+                    <ul class="text-lg text-gray-600 space-y-2 max-h-40 overflow-y-auto">
+        `;
 
             patient.Procedures.forEach(proc => {
-                const subProc = proc.SubProcedureType && proc.SubProcedureType !== 'N/A' ?
-                    ` - ${proc.SubProcedureType}` : '';
-                const endDisplay = proc.EndTime ? proc.EndTime :
-                    `<span class='text-green-600 font-semibold'>Ongoing</span>`;
                 const startTS = normalizeTS(proc.StartTS);
                 const endTS = normalizeTS(proc.EndTS);
-                let duration = startTS ? (endTS ? endTS - startTS : now - startTS) : 0;
+                const now2 = Math.floor(Date.now() / 1000);
+
+                let duration = startTS ? (endTS ? endTS - startTS : now2 - startTS) : 0;
                 if (duration < 0) duration = 0;
 
                 html += `
-        <li class="border-b border-gray-100 pb-1">
-          <span>${proc.Department}</span>
-          <p><span class="text-[20px]">${proc.ProcedureType}</span>${subProc}</p>
-          <p class="text-[20px] text-gray-500">
-            Duration: ${proc.StartTime || '—'} → ${endDisplay}<br>
-            <span class="italic">${proc.FullName}</span><br>
-            <span class="text-blue-700 font-semibold timer text-[20px]"
-                  data-start="${startTS ?? ''}" data-end="${endTS ?? ''}">
-              ${formatHMS(duration)}${endTS ? ' (Done)' : ''}
-            </span>
-          </p>
-        </li>`;
+                <li class="border-b pb-1">
+                    <p class="text-[20px]">${proc.Department}</p>
+                    <p class="text-[20px]">${proc.ProcedureType} - ${proc.SubProcedureType}</p>
+                    <p class="text-gray-500 text-[20px]">
+                        Duration: ${proc.StartTime || '—'} → ${proc.EndTime || '<span class="text-green-600">Ongoing</span>'}<br>
+                        <span class="italic">${proc.FullName}</span><br>
+                        <span class="timer text-blue-700 font-semibold text-[20px]"
+                              data-start="${startTS}" data-end="${endTS}">
+                            ${formatHMS(duration)}${endTS ? ' (Done)' : ''}
+                        </span>
+                    </p>
+                </li>`;
             });
 
             html += `
-          </ul>
-          <div class="mt-3 text-center font-semibold text-gray-700">
-            Total Stay: <span class="text-blue-800 text-xl total-stay">${formatHMS(diff)}</span>
-          </div>
-        </div>
-      </div>`;
+                    </ul>
+
+                    <div class="mt-3 text-center font-semibold text-gray-700">
+                        Total Stay:
+                        <span class="total-stay text-blue-800 text-xl">${formatHMS(diff)}</span>
+                    </div>
+
+                </div>
+            </div>`;
         });
 
-        if (html === '') {
-            html = `<div class="text-center text-gray-500 text-xl col-span-full">
-              ✅ All patients have been discharged or admitted
-            </div>`;
+        if (html === "") {
+            html = `
+            <div class="text-center text-gray-500 text-xl col-span-full">
+                ✅ All patients discharged or admitted
+            </div>
+        `;
         }
 
-        $('#tatDashboard').html(html);
+        $("#tatDashboard").html(html);
+
+        // Debug: show all cards and timestamps
+        document.querySelectorAll("[data-triage-start]").forEach(el => {
+            console.log("Rendered card → triage-start:", el.getAttribute("data-triage-start"));
+        });
     }
 
-    // live timer + color update
+    /* ---------- Timers + Color Updates ---------- */
+
     function updateTimers() {
         const now = Math.floor(Date.now() / 1000);
 
-        $('.timer').each(function() {
-            const startTS = normalizeTS($(this).attr('data-start'));
-            const endTS = normalizeTS($(this).attr('data-end'));
+        // Update all durations
+        $(".timer").each(function() {
+            const startTS = normalizeTS($(this).data("start"));
+            const endTS = normalizeTS($(this).data("end"));
+
             if (!startTS) return;
 
-            let diff = endTS ? (endTS - startTS) : (now - startTS);
-            if (diff < 0) diff = 0;
-
-            $(this).text(formatHMS(diff) + (endTS ? ' (Done)' : ''));
+            const diff = endTS ? endTS - startTS : now - startTS;
+            $(this).text(formatHMS(diff) + (endTS ? " (Done)" : ""));
         });
 
-        $('.rounded-2xl').each(function() {
-            const startTS = normalizeTS($(this).attr('data-triage-start'));
-            if (!startTS) return;
-            const diff = now - startTS;
+        // Update card colors
+        $(".rounded-2xl").each(function() {
+            const triageStart = normalizeTS($(this).data("triage-start"));
 
-            const [pulseClass, emoji] = getStatusColorAndEmoji(diff);
+            if (!triageStart) {
+                console.warn("⚠ Card missing triage-start attribute →", this);
+                return;
+            }
+
+            const diff = now - triageStart;
+            const [colorClass, emoji] = getStatusColorAndEmoji(diff);
+
             $(this)
-                .removeClass('pulse-green pulse-yellow pulse-red pulse-orange')
-                .addClass(pulseClass)
-                .find('.emoji')
-                .text(emoji);
-            $(this).find('.total-stay').text(formatHMS(diff));
+                .removeClass("pulse-green pulse-yellow pulse-red pulse-orange")
+                .addClass(colorClass)
+                .find(".emoji").text(emoji);
+
+            $(this).find(".total-stay").text(formatHMS(diff));
         });
     }
+
+    /* ---------- AJAX Loader ---------- */
 
     let dashboardData = [];
 
     function fetchData() {
         $.ajax({
-            url: '../include/transaction.inc.php',
-            method: 'POST',
-            dataType: 'json',
+            url: "../include/transaction.inc.php",
+            method: "POST",
+            dataType: "json",
             data: {
                 data: JSON.stringify({
-                    Action: 'LoadTATDashboard'
+                    Action: "LoadTATDashboard"
                 })
             },
+
             success: function(response) {
                 if (response.data) {
                     const newData = JSON.stringify(response.data);
@@ -272,7 +304,8 @@
                     }
                 }
             },
-            error: err => console.error('❌ Fetch failed:', err)
+
+            error: err => console.error("❌ Fetch error:", err)
         });
     }
 
